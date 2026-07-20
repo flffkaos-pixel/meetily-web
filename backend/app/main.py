@@ -1,9 +1,9 @@
-import os
-import io
-import json
-import logging
+import os, io, json, logging
 from datetime import datetime, timezone
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Meetily API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_API_KEY") != "sk-placeholder-for-dev" else None
 
 @app.on_event("startup")
 def startup():
@@ -185,8 +185,9 @@ def check_usage(user: User, duration_minutes: float):
 @app.post("/api/transcribe")
 async def transcribe_audio(file: UploadFile = File(...), meeting_title: Optional[str] = Form("Untitled Meeting"),
                            user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not openai_client:
+        raise HTTPException(500, "OpenAI API key not configured. Set OPENAI_API_KEY in .env")
     content = await file.read()
-    # OpenAI Whisper API: max 25MB, supports mp3/mp4/mpeg/mpga/m4a/wav/webm
     try:
         transcript = openai_client.audio.transcriptions.create(
             model="whisper-1",
@@ -235,6 +236,8 @@ async def summarize_meeting(meeting_id: str, custom_prompt: Optional[str] = Form
     transcript_text = "\n".join([t.text for t in meeting.transcripts])
     if not transcript_text.strip():
         raise HTTPException(400, "No transcript to summarize")
+    if not openai_client:
+        raise HTTPException(500, "OpenAI API key not configured. Set OPENAI_API_KEY in .env")
 
     prompt = custom_prompt or (
         "Summarize the following meeting transcript. Include:\n"
